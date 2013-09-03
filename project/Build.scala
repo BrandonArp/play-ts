@@ -13,11 +13,36 @@ object PluginBuild extends Build {
     version := "0.2-SNAPSHOT",
     scalaVersion := "2.9.2",
     sbtVersion := "0.12.2",
-
     addSbtPlugin("play" % "sbt-plugin" % "2.1.1"),
     resolvers += "Local Maven" at Path.userHome.asFile.toURI.toURL + ".m2/repository",
     libraryDependencies ++= Seq(
       "com.mangofactory" % "typescript4j" % "0.4.0-SNAPSHOT"
-    )
+    ),
+
+    pomIncludeRepository := { _ => false },
+    publishMavenStyle := true,
+    publishTo <<= version {
+      (v: String) =>
+        val nexus = "https://oss.sonatype.org/"
+        if (v.trim.endsWith("SNAPSHOT"))
+          Some("snapshots" at nexus + "content/repositories/snapshots")
+        else
+          Some("releases" at nexus + "service/local/staging/deploy/maven2")
+    },
+
+    licenses := Seq("Apache-2" -> url("http://opensource.org/licenses/Apache-2.0")),
+    homepage := Some (url("https://github.com/BrandonArp/play-ts")),
+    pomExtra := (
+        <scm>
+          <url>git@github.com:BrandonArp/play-ts.git</url>
+          <connection>scm:git:git@github.com:BrandonArp/play-ts.git</connection>
+        </scm>
+        <developers>
+          <developer>
+            <id>barp</id>
+            <name>Brandon Arp</name>
+            <email>brandonarp@gmail.com</email>
+          </developer>
+        </developers>)
   )
 }

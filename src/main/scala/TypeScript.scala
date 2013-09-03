@@ -61,7 +61,7 @@ object TypeScriptPlugin extends sbt.Plugin {
     val setThrowsMethod = contextClass.getMethod("setThrowExceptionOnCompilationFailure", classOf[Boolean])
 
 
-    val context = contextFactoryMethod.invoke(null, source)
+    val context = contextFactoryMethod.invoke(null, source.getParentFile)
     setThrowsMethod.invoke(context, Boolean.box(false))
     val compileMethod = newCompilerClass.getMethod("compile", classOf[File], contextClass)
     val output = compileMethod.invoke(compiler, source, context).asInstanceOf[String]
@@ -72,12 +72,12 @@ object TypeScriptPlugin extends sbt.Plugin {
     val problemGetLine = problemClass.getMethod("getLine")
     val problemGetColumn = problemClass.getMethod("getColumn")
     val problemGetMessage = problemClass.getMethod("getMessage")
-    var problem = problems.toArray.head
-    var problemMessage = problemGetMessage.invoke(problem).asInstanceOf[String]
-    var problemLine = problemGetLine.invoke(problem).asInstanceOf[Int]
-    var problemColumn = problemGetColumn.invoke(problem).asInstanceOf[Int]
-
     if (problems.size() > 0) {
+      var problem = problems.toArray.head
+      var problemMessage = problemGetMessage.invoke(problem).asInstanceOf[String]
+      var problemLine = problemGetLine.invoke(problem).asInstanceOf[Int]
+      var problemColumn = problemGetColumn.invoke(problem).asInstanceOf[Int]
+
       throw AssetCompilationException(Some(source), problemMessage, Some(problemLine - 1), Some(problemColumn - 1))
     }
 

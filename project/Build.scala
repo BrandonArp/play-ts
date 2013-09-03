@@ -14,6 +14,7 @@ object PluginBuild extends Build {
     scalaVersion := "2.9.2",
     sbtVersion := "0.12.2",
 
+    addSbtPlugin("play" % "sbt-plugin" % "2.1.1"),
     resolvers += "Local Maven" at Path.userHome.asFile.toURI.toURL + ".m2/repository",
     libraryDependencies ++= Seq(
       "com.mangofactory" % "typescript4j" % "0.4.0-SNAPSHOT"

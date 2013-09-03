@@ -1,106 +1,109 @@
-package typescript
+package com.arpnetworking.typescript
 
 import sbt._
 import sbt.Keys._
-import sbt.Project.Initialize
 import com.mangofactory.typescript._
+import java.net.URLClassLoader
+import play.Project
+import sbt.classpath.SelfFirstLoader
+import sbt.PlayExceptions.AssetCompilationException
 
-object TypeScriptPlugin extends Plugin {
+object TypeScriptPlugin extends sbt.Plugin {
   val TypeScript = config("typescript")
-  
   val typescript = TaskKey[Seq[File]]("typescript", "Compiles typescript to javascript")
-
+  val ldeps = TaskKey[Unit]("ldeps", "Lists the dependencies for debugging")
+  val ver = TaskKey[String]("ver", "Prints the version of the typescript plugin")
   val typescriptEntryPoints = SettingKey[PathFinder]("typescript-entry-points")
-
   val typescriptCompilerOptions = SettingKey[Seq[String]]("typescript-compiler-options")
   
-  val typescriptSettings: Seq[sbt.Project.Setting[_]] = inConfig(TypeScript)(Seq(
-    typescriptEntryPoints <<= (sourceDirectory in Compile)(base => ((base / "assets" ** "*.ts") --- base / "assets" ** "_*")),
-    typescriptCompilerOptions := Seq.empty[String]
-  )) ++ Seq( resourceGenerators in Compile <+= TypeScriptCompiler,
-    libraryDependencies ++= Seq("com.mangofactory" % "typescript4j" % "0.4.0-SNAPSHOT" ))
+  val typescriptSettings: Seq[Setting[_]] = inConfig(TypeScript)(Seq[Setting[_]](
+    typescriptEntryPoints <<= (sourceDirectory in Compile)(base => ((base / "assets" ** "*.ts") --- (base / "assets" ** "_*") --- (base / "assets" ** "*.d.ts"))),
+    typescriptCompilerOptions := Seq.empty[String],
+    typescript <<= TypeScriptCompiler,
+    ldeps := ListDeps,
+    ver := Ver,
+
+    resourceGenerators in Compile <+= typescript in TypeScript,
+    libraryDependencies ++= Seq("com.mangofactory" % "typescript4j" % "0.4.0-SNAPSHOT")
+  ))
+
+  def ListDeps = libraryDependencies.in(Compile)
+
+  def Ver = {
+    "6.0"
+  }
 
   def CompileTSFile(source: File, options: Seq[String]): (String, Option[String], Seq[File]) = {
 
     val origin = Path(source).absolutePath
 
+    val klass = classOf[TypescriptCompiler]
+    val origClassLoader = klass.getClassLoader()
+    val toReplace = findJarsToReplace(origClassLoader)
 
 
-    ("COMPILED FILE", Some("MINIFIED FILE"), Nil)
+    val newLoader = new SelfFirstLoader(toReplace.orNull, origClassLoader)
 
+    findJarsToReplace(newLoader )
+
+    val newCompilerClass = newLoader.loadClass(klass.getCanonicalName(), true)
+
+    val compiler = newCompilerClass.newInstance()
+    val ecmaVersion = newLoader.loadClass(classOf[EcmaScriptVersion].getCanonicalName)
+    val setEcmaVersionMethod = compiler.getClass.getMethod("setEcmaScriptVersion", ecmaVersion)
+    val versions = ecmaVersion.getEnumConstants
+    setEcmaVersionMethod.invoke(compiler, versions(1).asInstanceOf[AnyRef])
+
+    val contextRegistryClass = newLoader.loadClass(classOf[CompilationContextRegistry].getCanonicalName)
+    val contextFactoryMethod = contextRegistryClass.getMethod("getNew", classOf[sbt.File])
+
+    val contextClass = newLoader.loadClass(classOf[CompilationContext].getCanonicalName)
+    val setThrowsMethod = contextClass.getMethod("setThrowExceptionOnCompilationFailure", classOf[Boolean])
+
+
+    val context = contextFactoryMethod.invoke(null, source)
+    setThrowsMethod.invoke(context, Boolean.box(false))
+    val compileMethod = newCompilerClass.getMethod("compile", classOf[File], contextClass)
+    val output = compileMethod.invoke(compiler, source, context).asInstanceOf[String]
+    val getProblemsMethod = contextClass.getMethod("getProblems")
+    val problemClass = newLoader.loadClass(classOf[TypescriptCompilationProblem].getCanonicalName)
+    val problems = getProblemsMethod.invoke(context).asInstanceOf[java.util.List[_]]
+    val problemToString = problemClass.getMethod("toString")
+    val problemGetLine = problemClass.getMethod("getLine")
+    val problemGetColumn = problemClass.getMethod("getColumn")
+    val problemGetMessage = problemClass.getMethod("getMessage")
+    var problem = problems.toArray.head
+    var problemMessage = problemGetMessage.invoke(problem).asInstanceOf[String]
+    var problemLine = problemGetLine.invoke(problem).asInstanceOf[Int]
+    var problemColumn = problemGetColumn.invoke(problem).asInstanceOf[Int]
+
+    if (problems.size() > 0) {
+      throw AssetCompilationException(Some(source), problemMessage, Some(problemLine - 1), Some(problemColumn - 1))
+    }
+
+    (output, Some("MINIFIED FILE"), Nil)
   }
 
-  def TypeScriptCompiler = AssetsCompiler("typescript",
+  def findJarsToReplace(classLoader :ClassLoader) :Option[Seq[URL]] = {
+    if (classLoader == null) {
+      return Option.empty
+    }
+//    println("Classloader: " + classLoader)
+    val urls:List[URL] = classLoader match {
+      case ul:URLClassLoader => ul.getURLs().toList
+      case _ => List.empty
+    }
+    val ret = Option.apply(urls.filter(f=>{f.toString.contains("org.mozilla/rhino") || f.toString.contains("com.mangofactory")}))
+ //   println("urls = " + urls.mkString(" "))
+    return ret orElse findJarsToReplace(classLoader.getParent)
+  }
+
+  def TypeScriptCompiler = Project.AssetsCompiler("typescript",
     (_ ** "*.ts"),
-    typescriptEntryPoints,
+    typescriptEntryPoints in TypeScript,
     { (name, min) => name.replace(".ts", if (min) ".min.js" else ".js") },
     { (tsFile: File, options) => CompileTSFile(tsFile, options) },
-    typescriptCompilerOptions
+    typescriptCompilerOptions in TypeScript
   )
-
-  def AssetsCompiler(name: String,
-    watch: File => PathFinder,
-    filesSetting: sbt.SettingKey[PathFinder],
-    naming: (String, Boolean) => String,
-    compile: (File, Seq[String]) => (String, Option[String], Seq[File]),
-    optionsSettings: sbt.SettingKey[Seq[String]]) =
-    (state, sourceDirectory in Compile, resourceManaged in Compile, cacheDirectory, optionsSettings, filesSetting) map { (state, src, resources, cache, options, files) =>
-
-      import java.io._
-
-      val cacheFile = cache / name
-      val currentInfos = watch(src).get.map(f => f -> FileInfo.lastModified(f)).toMap
-
-      val (previousRelation, previousInfo) = Sync.readInfo(cacheFile)(FileInfo.lastModified.format)
-
-      if (previousInfo != currentInfos) {
-
-        //a changed file can be either a new file, a deleted file or a modified one
-        lazy val changedFiles: Seq[File] = currentInfos.filter(e => !previousInfo.get(e._1).isDefined || previousInfo(e._1).lastModified < e._2.lastModified).map(_._1).toSeq ++ previousInfo.filter(e => !currentInfos.get(e._1).isDefined).map(_._1).toSeq
-
-        //erease dependencies that belong to changed files
-        val dependencies = previousRelation.filter((original, compiled) => changedFiles.contains(original))._2s
-        dependencies.foreach(IO.delete)
-
-        /**
-         * If the given file was changed or
-         * if the given file was a dependency,
-         * otherwise calculate dependencies based on previous relation graph
-         */
-        val generated: Seq[(File, java.io.File)] = (files x relativeTo(Seq(src / "assets"))).flatMap {
-          case (sourceFile, name) => {
-            if (changedFiles.contains(sourceFile) || dependencies.contains(new File(resources, "public/" + naming(name, false)))) {
-              val (debug, min, dependencies) = try {
-                compile(sourceFile, options)
-              } catch {
-                case e: TypescriptException => throw e
-              }
-              val out = new File(resources, "public/" + naming(name, false))
-              IO.write(out, debug)
-              (dependencies ++ Seq(sourceFile)).toSet[File].map(_ -> out) ++ min.map { minified =>
-                val outMin = new File(resources, "public/" + naming(name, true))
-                IO.write(outMin, minified)
-                (dependencies ++ Seq(sourceFile)).map(_ -> outMin)
-              }.getOrElse(Nil)
-            } else {
-              previousRelation.filter((original, compiled) => original == sourceFile)._2s.map(sourceFile -> _)
-            }
-          }
-        }
-
-        //write object graph to cache file 
-        Sync.writeInfo(cacheFile,
-          Relation.empty[File, File] ++ generated,
-          currentInfos)(FileInfo.lastModified.format)
-
-        // Return new files
-        generated.map(_._2).distinct.toList
-
-      } else {
-        // Return previously generated files
-        previousRelation._2s.toSeq
-      }
-
-    }
 
 }

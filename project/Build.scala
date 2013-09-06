@@ -10,13 +10,13 @@ object PluginBuild extends Build {
     name := "play-ts",
     description := "SBT plugin for handling TypeScript assets in Play 2",
     organization := "com.arpnetworking",
-    version := "0.2-SNAPSHOT",
+    version := "0.2",
     scalaVersion := "2.9.2",
     sbtVersion := "0.12.2",
     addSbtPlugin("play" % "sbt-plugin" % "2.1.1"),
     resolvers += "Local Maven" at Path.userHome.asFile.toURI.toURL + ".m2/repository",
     libraryDependencies ++= Seq(
-      "com.mangofactory" % "typescript4j" % "0.4.0-SNAPSHOT"
+      "com.mangofactory" % "typescript4j" % "0.4.0"
     ),
 
     pomIncludeRepository := { _ => false },

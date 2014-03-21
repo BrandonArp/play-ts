@@ -4,9 +4,10 @@ import sbt._
 import sbt.Keys._
 import com.mangofactory.typescript._
 import java.net.URLClassLoader
-import play.Project
+import play.{PlayExceptions, Project}
 import sbt.classpath.SelfFirstLoader
-import sbt.PlayExceptions.AssetCompilationException
+import play.PlayExceptions.AssetCompilationException
+import java.lang.reflect.InvocationTargetException
 
 object TypeScriptPlugin extends sbt.Plugin {
   val TypeScript = config("typescript")
@@ -22,79 +23,52 @@ object TypeScriptPlugin extends sbt.Plugin {
     typescript <<= TypeScriptCompiler,
     ldeps := ListDeps,
     ver := Ver,
-
-    resourceGenerators in Compile <+= typescript in TypeScript,
-    libraryDependencies ++= Seq("com.mangofactory" % "typescript4j" % "0.4.0-SNAPSHOT")
+    resourceGenerators in Compile <+= typescript in TypeScript
   ))
 
   def ListDeps = libraryDependencies.in(Compile)
 
   def Ver = {
-    "6.0"
+    "18.0"
   }
 
-  def CompileTSFile(source: File, options: Seq[String]): (String, Option[String], Seq[File]) = {
-
-    val origin = Path(source).absolutePath
+  lazy val compilerProxy = {
+    val resourceUrl = getClass().getResource("").toString
+    val filteredUrl = resourceUrl.substring(resourceUrl.indexOf("file:"), resourceUrl.lastIndexOf("!"))
 
     val klass = classOf[TypescriptCompiler]
     val origClassLoader = klass.getClassLoader()
-    val toReplace = findJarsToReplace(origClassLoader)
+    val existingJars = findJarsToReplace(origClassLoader).getOrElse(Seq())
+    val toReplace = existingJars.union(Seq[URL](new URL(filteredUrl)))
 
+    val newLoader = new SelfFirstLoader(toReplace, origClassLoader)
 
-    val newLoader = new SelfFirstLoader(toReplace.orNull, origClassLoader)
+    val newCompilerClass = newLoader.loadClass(classOf[CompilerProxy].getCanonicalName(), true)
 
-    findJarsToReplace(newLoader )
+    newCompilerClass.newInstance()
+  }
 
-    val newCompilerClass = newLoader.loadClass(klass.getCanonicalName(), true)
+  def CompileTSFile(source: File, options: Seq[String]): (String, Option[String], Seq[File]) = {
+    val compilerClass = compilerProxy.getClass
 
-    val compiler = newCompilerClass.newInstance()
-    val ecmaVersion = newLoader.loadClass(classOf[EcmaScriptVersion].getCanonicalName)
-    val setEcmaVersionMethod = compiler.getClass.getMethod("setEcmaScriptVersion", ecmaVersion)
-    val versions = ecmaVersion.getEnumConstants
-    setEcmaVersionMethod.invoke(compiler, versions(1).asInstanceOf[AnyRef])
+    val compileMethod = compilerClass.getMethod("compile", classOf[File], classOf[Seq[String]])
 
-    val contextRegistryClass = newLoader.loadClass(classOf[CompilationContextRegistry].getCanonicalName)
-    val contextFactoryMethod = contextRegistryClass.getMethod("getNew", classOf[sbt.File])
-
-    val contextClass = newLoader.loadClass(classOf[CompilationContext].getCanonicalName)
-    val setThrowsMethod = contextClass.getMethod("setThrowExceptionOnCompilationFailure", classOf[Boolean])
-
-
-    val context = contextFactoryMethod.invoke(null, source.getParentFile)
-    setThrowsMethod.invoke(context, Boolean.box(false))
-    val compileMethod = newCompilerClass.getMethod("compile", classOf[File], contextClass)
-    val output = compileMethod.invoke(compiler, source, context).asInstanceOf[String]
-    val getProblemsMethod = contextClass.getMethod("getProblems")
-    val problemClass = newLoader.loadClass(classOf[TypescriptCompilationProblem].getCanonicalName)
-    val problems = getProblemsMethod.invoke(context).asInstanceOf[java.util.List[_]]
-    val problemToString = problemClass.getMethod("toString")
-    val problemGetLine = problemClass.getMethod("getLine")
-    val problemGetColumn = problemClass.getMethod("getColumn")
-    val problemGetMessage = problemClass.getMethod("getMessage")
-    if (problems.size() > 0) {
-      var problem = problems.toArray.head
-      var problemMessage = problemGetMessage.invoke(problem).asInstanceOf[String]
-      var problemLine = problemGetLine.invoke(problem).asInstanceOf[Int]
-      var problemColumn = problemGetColumn.invoke(problem).asInstanceOf[Int]
-
-      throw AssetCompilationException(Some(source), problemMessage, Some(problemLine - 1), Some(problemColumn - 1))
+    try {
+      compileMethod.invoke(compilerProxy, source, options).asInstanceOf[(String, Option[String], Seq[File])]
+    } catch {
+      case ite: InvocationTargetException => throw ite.getTargetException()
     }
-
-    (output, Some("MINIFIED FILE"), Nil)
   }
 
   def findJarsToReplace(classLoader :ClassLoader) :Option[Seq[URL]] = {
     if (classLoader == null) {
       return Option.empty
     }
-//    println("Classloader: " + classLoader)
     val urls:List[URL] = classLoader match {
       case ul:URLClassLoader => ul.getURLs().toList
       case _ => List.empty
     }
     val ret = Option.apply(urls.filter(f=>{f.toString.contains("org.mozilla/rhino") || f.toString.contains("com.mangofactory")}))
- //   println("urls = " + urls.mkString(" "))
     return ret orElse findJarsToReplace(classLoader.getParent)
   }
 

@@ -19,16 +19,25 @@ object PluginBuild extends Build {
       "com.mangofactory" % "typescript4j" % "0.5.0-SNAPSHOT"
     ),
 
+  credentials += Credentials.apply("Sonatype Nexus Repository Manager", "nexus-dev", "deployment", "deployment"),
     pomIncludeRepository := { _ => false },
     publishMavenStyle := true,
-    publishTo <<= version {
-      (v: String) =>
-        val nexus = "https://oss.sonatype.org/"
-        if (v.trim.endsWith("SNAPSHOT"))
-          Some("snapshots" at nexus + "content/repositories/snapshots")
-        else
-          Some("releases" at nexus + "service/local/staging/deploy/maven2")
-    },
+//    publishTo <<= version {
+//      (v: String) =>
+//        val nexus = "https://oss.sonatype.org/"
+//        if (v.trim.endsWith("SNAPSHOT"))
+//          Some("snapshots" at nexus + "content/repositories/snapshots")
+//        else
+//          Some("releases" at nexus + "service/local/staging/deploy/maven2")
+//    },
+      publishTo <<= version {
+        (v: String) =>
+          val nexus = "http://nexus-dev/content/repositories/"
+          if (v.trim.endsWith("SNAPSHOT"))
+            Some("snapshots" at nexus + "snapshots/")
+          else
+            Some("releases" at nexus + "releases/")
+      },
 
     licenses := Seq("Apache-2" -> url("http://opensource.org/licenses/Apache-2.0")),
     homepage := Some (url("https://github.com/BrandonArp/play-ts")),

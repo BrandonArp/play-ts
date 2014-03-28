@@ -4,9 +4,8 @@ import sbt._
 import sbt.Keys._
 import com.mangofactory.typescript._
 import java.net.URLClassLoader
-import play.{PlayExceptions, Project}
+import play.Project
 import sbt.classpath.SelfFirstLoader
-import play.PlayExceptions.AssetCompilationException
 import java.lang.reflect.InvocationTargetException
 
 object TypeScriptPlugin extends sbt.Plugin {
@@ -29,7 +28,7 @@ object TypeScriptPlugin extends sbt.Plugin {
   def ListDeps = libraryDependencies.in(Compile)
 
   def Ver = {
-    "18.0"
+    "19.0"
   }
 
   lazy val compilerProxy = {

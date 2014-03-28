@@ -10,7 +10,7 @@ object PluginBuild extends Build {
     name := "play-ts",
     description := "SBT plugin for handling TypeScript assets in Play 2",
     organization := "com.arpnetworking",
-    version := "0.6-SNAPSHOT",
+    version := "0.7-SNAPSHOT",
     scalaVersion := "2.10.3",
     sbtVersion := "0.13.0",
     addSbtPlugin("com.typesafe.play" % "sbt-plugin" % "2.2.2"),

@@ -4,8 +4,9 @@ import sbt.File
 import com.mangofactory.typescript._
 import play.PlayExceptions
 import PlayExceptions.AssetCompilationException
-import scala.sys.process.ProcessLogger
 import scala.sys.process._
+import play.core.jscompile.JavascriptCompiler.CompilationException
+import scala.util.control.Exception.catching
 
 class CompilerProxy {
 
@@ -34,19 +35,40 @@ class CompilerProxy {
         throw AssetCompilationException(Some(source), problem.getMessage, Some(problem.getLine - 1), Some(problem.getColumn - 1))
       }
 
-      (output, Some("MINIFIED FILE"), Nil)
+      val minified = catching(classOf[CompilationException]).opt(play.core.jscompile.JavascriptCompiler.minify(output, Some(source.getName)))
+      (output, minified, Seq(source))
     } else {
       val tempFile = java.io.File.createTempFile("tsccomp", null)
-      var logger = ""
-      val cProcess = "tsc --out ".concat(tempFile.getAbsolutePath).concat(" ").concat(source.getAbsolutePath).run(ProcessLogger(line => logger = logger.concat(line)))
+      var logger = "\n"
+      val cProcess = "tsc --out ".concat(tempFile.getAbsolutePath).concat(" ").concat(source.getAbsolutePath).run(ProcessLogger(line => logger = logger.concat(line).concat("\n")))
       val cOut = cProcess.exitValue()
+
+      val absPath = source.getAbsolutePath
       if (cOut != 0) {
-        throw AssetCompilationException(Some(source), logger, None, None)
+        var start = logger.indexOf(absPath)
+        while (start >= 0) {
+          val startLoc = start + absPath.length
+          System.out.println("startLoc: " + startLoc)
+          if (logger.substring(startLoc, startLoc + 1).equals("(")) {
+            //We might have found the first (
+            val stop = logger.indexOf(")", startLoc)
+            if (stop > 0) {
+              val spread = logger.substring(startLoc + 1, stop)
+              System.out.println("spread: " + spread)
+              val split = spread.split(",")
+              val (row, col) = (split(0).toInt - 1, split(1).toInt - 1)
+              throw AssetCompilationException(Some(source), logger, Some(row), Some(col))
+            }
+          }
+          start = logger.indexOf(source.getAbsolutePath, start + 1)
+        }
       }
       val fileSource = scala.io.Source.fromFile(tempFile.getAbsolutePath)
       val compiledCode = fileSource.mkString
       fileSource.close()
-      (compiledCode, Some("MINIFIED FILE"), Nil)
+      catching(classOf[Exception]).opt(tempFile.delete())
+      val minified = catching(classOf[CompilationException]).opt(play.core.jscompile.JavascriptCompiler.minify(compiledCode, Some(source.getName)))
+      (compiledCode, minified, Seq(source))
     }
   }
 }

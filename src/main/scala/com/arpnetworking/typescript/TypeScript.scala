@@ -28,7 +28,7 @@ object TypeScriptPlugin extends sbt.Plugin {
   def ListDeps = libraryDependencies.in(Compile)
 
   def Ver = {
-    "19.0"
+    "20.0"
   }
 
   lazy val compilerProxy = {

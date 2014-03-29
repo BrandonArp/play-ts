@@ -7,6 +7,7 @@ import PlayExceptions.AssetCompilationException
 import scala.sys.process._
 import play.core.jscompile.JavascriptCompiler.CompilationException
 import scala.util.control.Exception.catching
+import java.io.IOException
 
 class CompilerProxy {
 
@@ -20,7 +21,7 @@ class CompilerProxy {
   def compile(source: File, options: Seq[String]): (String, Option[String], Seq[File]) = {
     val basePath = source.getParentFile
 
-    val useTsc = "tsc".run(ProcessLogger(line => ())).exitValue() == 0
+    val useTsc = catching(classOf[IOException]).opt("tsc".run(ProcessLogger(line => ())).exitValue() == 0).getOrElse(false)
 
     if (!useTsc) {
 
